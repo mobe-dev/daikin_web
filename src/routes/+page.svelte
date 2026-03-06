@@ -10,15 +10,18 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Slider } from '$lib/components/ui/slider';
 	import { Separator } from '$lib/components/ui/separator';
-	import { connectDaikinBluetooth, type DaikinClient } from '$lib/bluetooth/daikin';
+	import { connectDaikinBluetooth, type DaikinClient, type DaikinDebugSnapshot, type WireProtocolMode } from '$lib/bluetooth/daikin';
 	import { defaultState, modeLabels, type DaikinControllerState, type FanSpeed, type HvacMode } from '$lib/daikin/properties';
-	import { knownDevices, lastCapabilities, lastControllerState, userPreferences } from '$lib/stores/persistent';
+	import { debugPreferences, knownDevices, lastCapabilities, lastControllerState, userPreferences } from '$lib/stores/persistent';
 
 	let client: DaikinClient | null = null;
 	let status = 'Disconnected';
 	let busy = false;
 	let controller: DaikinControllerState = defaultState;
 	let target = defaultState.targetCelsius;
+	let debug: DaikinDebugSnapshot | null = null;
+	let protocolMode: WireProtocolMode = get(debugPreferences).wireProtocolMode;
+	let preferredCharacteristicId = get(debugPreferences).preferredCharacteristicId ?? '';
 
 	const fanSpeeds: FanSpeed[] = ['auto', 'quiet', '1', '2', '3', '4', '5', 'turbo'];
 	const toggles: [string, keyof DaikinControllerState][] = [
@@ -33,6 +36,23 @@
 		['Beep enabled', 'beepEnabled'],
 		['Weekly timer', 'weeklyTimerEnabled']
 	];
+
+	function saveDebugPreferences() {
+		debugPreferences.update((v) => ({
+			...v,
+			wireProtocolMode: protocolMode,
+			preferredCharacteristicId: preferredCharacteristicId || undefined
+		}));
+	}
+
+	function refreshDebug() {
+		if (!client) return;
+		debug = client.getDebugSnapshot();
+		if (!preferredCharacteristicId && debug.writableCharacteristicIds.length > 0) {
+			preferredCharacteristicId = debug.writableCharacteristicIds[0];
+			saveDebugPreferences();
+		}
+	}
 
 	async function connect() {
 		busy = true;
@@ -52,6 +72,7 @@
 			]);
 			userPreferences.update((v) => ({ ...v, lastSelectedDeviceId: client?.device.id }));
 			status = `Connected: ${client.device.name}`;
+			refreshDebug();
 		} catch (error) {
 			status = error instanceof Error ? error.message : 'Failed to connect.';
 		} finally {
@@ -63,12 +84,24 @@
 		controller = { ...controller, ...patch };
 		lastControllerState.set(controller);
 		if (!client) return;
-		await client.writeState(patch);
+
+		try {
+			await client.writeState(patch, {
+				mode: protocolMode,
+				preferredCharacteristicId: preferredCharacteristicId || undefined
+			});
+			status = `Sent command (${protocolMode})`;
+		} catch (error) {
+			status = error instanceof Error ? `Write failed: ${error.message}` : 'Write failed';
+		}
+
+		refreshDebug();
 	}
 
 	function disconnect() {
 		client?.disconnect();
 		client = null;
+		debug = null;
 		status = 'Disconnected';
 	}
 
@@ -94,14 +127,16 @@
 		<Card.Content class="flex flex-wrap gap-3">
 			<Button onclick={connect} disabled={busy}>Connect device</Button>
 			<Button onclick={disconnect} variant="outline" disabled={!client}>Disconnect</Button>
+			<Button onclick={refreshDebug} variant="secondary" disabled={!client}>Refresh debug</Button>
 		</Card.Content>
 	</Card.Root>
 
 	<Tabs.Root value="core">
-		<Tabs.List class="grid w-full grid-cols-3">
+		<Tabs.List class="grid w-full grid-cols-4">
 			<Tabs.Trigger value="core">Core</Tabs.Trigger>
 			<Tabs.Trigger value="airflow">Airflow</Tabs.Trigger>
 			<Tabs.Trigger value="advanced">Advanced</Tabs.Trigger>
+			<Tabs.Trigger value="debug">Debug</Tabs.Trigger>
 		</Tabs.List>
 
 		<Tabs.Content value="core">
@@ -202,6 +237,71 @@
 								}}
 							/>
 						</div>
+					</div>
+				</Card.Content>
+			</Card.Root>
+		</Tabs.Content>
+
+		<Tabs.Content value="debug">
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Debug + Protocol Routing</Card.Title>
+					<Card.Description>
+						Every command is logged to the browser console with payload text + hex, target characteristic, and notification events.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<p class="text-sm font-medium">Wire protocol</p>
+							<Select.Root
+								type="single"
+								value={protocolMode}
+								onValueChange={(v) => {
+									protocolMode = v as WireProtocolMode;
+									saveDebugPreferences();
+								}}
+							>
+								<Select.Trigger>{protocolMode}</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="json-patch" label="json-patch">json-patch</Select.Item>
+									<Select.Item value="json-state" label="json-state">json-state</Select.Item>
+									<Select.Item value="kv" label="kv">kv</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+						<div class="space-y-2">
+							<p class="text-sm font-medium">Preferred writable characteristic ID</p>
+							<Input
+								placeholder="serviceUUID/characteristicUUID"
+								value={preferredCharacteristicId}
+								oninput={(e) => {
+									preferredCharacteristicId = (e.currentTarget as HTMLInputElement).value;
+									saveDebugPreferences();
+								}}
+							/>
+						</div>
+					</div>
+					<Separator />
+					<div class="space-y-2 text-sm">
+						<p class="font-medium">Writable characteristics discovered</p>
+						{#if debug && debug.writableCharacteristicIds.length > 0}
+							<ul class="list-disc pl-5">
+								{#each debug.writableCharacteristicIds as item}
+									<li>{item}</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-muted-foreground">No writable characteristics found yet.</p>
+						{/if}
+					</div>
+					<div class="space-y-2 text-sm">
+						<p class="font-medium">Latest TX / RX</p>
+						<p><strong>TX at:</strong> {debug?.lastWriteAt ?? 'n/a'}</p>
+						<p><strong>TX text:</strong> {debug?.lastWriteText ?? 'n/a'}</p>
+						<p><strong>TX hex:</strong> {debug?.lastWriteHex ?? 'n/a'}</p>
+						<p><strong>RX at:</strong> {debug?.lastNotifyAt ?? 'n/a'}</p>
+						<p><strong>RX hex:</strong> {debug?.lastNotifyHex ?? 'n/a'}</p>
 					</div>
 				</Card.Content>
 			</Card.Root>

@@ -9,11 +9,15 @@ Static Svelte 5 app to control Daikin Bluetooth AC controllers from the browser 
 - **shadcn-svelte** UI components.
 - **Web Bluetooth** picker with `acceptAllDevices: true` (no device restriction).
 - **Persistent local user/device data** with `svelte-persisted-store` and `localStorage`.
-- Control surface for all known portable IR/BT controller properties used in Daikin ecosystems:
+- Control surface for known controller properties:
   - Power, mode, temperature, fan speed, swing
   - Econo, Powerful, Quiet, Comfort, Streamer
   - Holiday, Mold proof, Weekly timer, Child lock, Beep toggle
   - On/Off timer times
+- **Deep debug tooling**:
+  - exhaustive browser console debug logs for connection, discovery, writes and notifications
+  - in-app Debug tab for protocol mode and writable characteristic routing
+  - TX/RX payload visibility (text + hex)
 
 ## Development
 
@@ -41,17 +45,17 @@ A workflow is included at `.github/workflows/deploy.yml`.
 - It builds with `BASE_PATH=/<repo>` automatically when deployed from a repository project page.
 - It deploys build artifacts to GitHub Pages using official actions.
 
-## Notes on protocol coverage
+## Protocol/debug notes
 
-This repo includes a typed property model for comprehensive controller features, plus a browser-safe Bluetooth client shell.
+Daikin BLE profiles vary by model and region. To make debugging practical across unknown variants, this app now:
 
-Because Daikin Bluetooth GATT profile variants are not consistently public across models, the low-level packet protocol layer is intentionally abstracted and must be adapted with model-specific UUIDs/encoders for your hardware family.
+- Enumerates primary services + characteristics.
+- Subscribes to notifications where supported.
+- Finds writable characteristics and allows picking a preferred target.
+- Sends commands using selectable wire formats (`json-patch`, `json-state`, `kv`).
+- Logs each TX/RX payload to `console.debug` with timestamps and hex dumps.
 
-The app architecture is ready for this with:
-
-- `src/lib/daikin/properties.ts`: canonical capability/state model
-- `src/lib/bluetooth/daikin.ts`: connection + read/write abstraction
-- `src/lib/stores/persistent.ts`: persistent stores for capabilities, known devices, and last state
+Use browser DevTools Console while changing settings to inspect exact packets and tune your preferred characteristic/protocol route.
 
 ## Svelte MCP
 
