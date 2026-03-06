@@ -24,6 +24,40 @@
 	let preferredCharacteristicId = get(debugPreferences).preferredCharacteristicId ?? '';
 
 	const fanSpeeds: FanSpeed[] = ['auto', 'quiet', '1', '2', '3', '4', '5', 'turbo'];
+	
+	let eyeBrightness = 0;
+	let indoorTemperature = 'n/a';
+	let outdoorTemperature = 'n/a';
+	let bleVersion = 'n/a';
+
+	async function refreshMadokaData() {
+		if (!client) return;
+		try {
+			const sensors = await client.getSensorInformation();
+			const maintenance = await client.getMaintenanceInformation();
+			const eye = await client.getEyeBrightness();
+			indoorTemperature = sensors[0x40]?.[0] !== undefined ? `${sensors[0x40][0]}°C` : 'n/a';
+			outdoorTemperature = sensors[0x41] ? `${sensors[0x41][0]}°C` : 'n/a';
+			bleVersion = maintenance[0x46] ? `${maintenance[0x46][0]}.${maintenance[0x46][1]}` : 'n/a';
+			eyeBrightness = eye ?? eyeBrightness;
+			status = 'Fetched Madoka data';
+		} catch (error) {
+			status = error instanceof Error ? `Fetch failed: ${error.message}` : 'Fetch failed';
+		}
+	}
+
+	async function setEyeBrightnessLevel() {
+		if (!client) return;
+		await client.setEyeBrightness(eyeBrightness);
+		status = `Eye brightness set to ${eyeBrightness}`;
+	}
+
+	async function clearFilterIndicator() {
+		if (!client) return;
+		await client.disableCleanFilterIndicator();
+		status = 'Clean filter indicator disable command sent';
+	}
+
 	const toggles: [string, keyof DaikinControllerState][] = [
 		['Econo', 'econo'],
 		['Powerful', 'powerful'],
@@ -73,6 +107,7 @@
 			userPreferences.update((v) => ({ ...v, lastSelectedDeviceId: client?.device.id }));
 			status = `Connected: ${client.device.name}`;
 			refreshDebug();
+			await refreshMadokaData();
 		} catch (error) {
 			status = error instanceof Error ? error.message : 'Failed to connect.';
 		} finally {
@@ -264,9 +299,7 @@
 							>
 								<Select.Trigger>{protocolMode}</Select.Trigger>
 								<Select.Content>
-									<Select.Item value="json-patch" label="json-patch">json-patch</Select.Item>
-									<Select.Item value="json-state" label="json-state">json-state</Select.Item>
-									<Select.Item value="kv" label="kv">kv</Select.Item>
+									<Select.Item value="madoka-uart" label="madoka-uart">madoka-uart</Select.Item>
 								</Select.Content>
 							</Select.Root>
 						</div>
@@ -281,6 +314,23 @@
 								}}
 							/>
 						</div>
+					</div>
+					<div class="grid gap-4 md:grid-cols-2">
+						<div class="space-y-2">
+							<p class="text-sm font-medium">Eye brightness (0-19)</p>
+							<Input type="number" min="0" max="19" bind:value={eyeBrightness} />
+							<Button variant="outline" onclick={setEyeBrightnessLevel} disabled={!client}>Set Eye Brightness</Button>
+						</div>
+						<div class="space-y-2">
+							<p class="text-sm font-medium">Maintenance actions</p>
+							<Button variant="outline" onclick={refreshMadokaData} disabled={!client}>Read sensor/maintenance info</Button>
+							<Button variant="outline" onclick={clearFilterIndicator} disabled={!client}>Disable clean filter indicator</Button>
+						</div>
+					</div>
+					<div class="space-y-1 text-sm">
+						<p><strong>Indoor temp:</strong> {indoorTemperature}</p>
+						<p><strong>Outdoor temp:</strong> {outdoorTemperature}</p>
+						<p><strong>BLE version:</strong> {bleVersion}</p>
 					</div>
 					<Separator />
 					<div class="space-y-2 text-sm">

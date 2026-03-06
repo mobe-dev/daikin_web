@@ -30,7 +30,7 @@ export const userPreferences = persisted<UserPreferences>('daikin-user-preferenc
 });
 
 export const debugPreferences = persisted<DebugPreferences>('daikin-debug-preferences-v1', {
-	wireProtocolMode: 'json-patch',
+	wireProtocolMode: 'madoka-uart',
 	preferredCharacteristicId: undefined,
 	verboseConsole: true
 });

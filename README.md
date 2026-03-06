@@ -9,15 +9,28 @@ Static Svelte 5 app to control Daikin Bluetooth AC controllers from the browser 
 - **shadcn-svelte** UI components.
 - **Web Bluetooth** picker with `acceptAllDevices: true` (no device restriction).
 - **Persistent local user/device data** with `svelte-persisted-store` and `localStorage`.
-- Control surface for known controller properties:
-  - Power, mode, temperature, fan speed, swing
-  - Econo, Powerful, Quiet, Comfort, Streamer
-  - Holiday, Mold proof, Weekly timer, Child lock, Beep toggle
-  - On/Off timer times
+- **Madoka (BRC1H) BLE protocol support** over UART-like BLE transport with chunking/reassembly.
 - **Deep debug tooling**:
   - exhaustive browser console debug logs for connection, discovery, writes and notifications
-  - in-app Debug tab for protocol mode and writable characteristic routing
+  - in-app Debug tab for protocol routing and writable characteristic visibility
   - TX/RX payload visibility (text + hex)
+
+## Implemented Madoka protocol functions
+
+- `0x000000` GetGeneralInfo
+- `0x000020` GetSettingStatus
+- `0x004020` SetSettingStatus
+- `0x000030` GetOperationMode
+- `0x004030` SetOperationMode
+- `0x000040` GetSetpoint
+- `0x004040` SetSetpoint (GFLOAT / SFLOAT)
+- `0x000050` GetFanSpeed
+- `0x004050` SetFanSpeed
+- `0x004220` DisableCleanFilterIndicator
+- `0x000110` GetSensorInformation
+- `0x000130` GetMaintenanceInformation
+- `0x000302` GetEyeBrightness
+- `0x004302` SetEyeBrightness
 
 ## Development
 
@@ -45,17 +58,14 @@ A workflow is included at `.github/workflows/deploy.yml`.
 - It builds with `BASE_PATH=/<repo>` automatically when deployed from a repository project page.
 - It deploys build artifacts to GitHub Pages using official actions.
 
-## Protocol/debug notes
+## Madoka transport notes
 
-Daikin BLE profiles vary by model and region. To make debugging practical across unknown variants, this app now:
+This implementation uses the observed UART-over-BLE framing:
 
-- Enumerates primary services + characteristics.
-- Subscribes to notifications where supported.
-- Finds writable characteristics and allows picking a preferred target.
-- Sends commands using selectable wire formats (`json-patch`, `json-state`, `kv`).
-- Logs each TX/RX payload to `console.debug` with timestamps and hex dumps.
-
-Use browser DevTools Console while changing settings to inspect exact packets and tune your preferred characteristic/protocol route.
+- MTU payload chunks up to 20 bytes
+- request fragmentation into `chunkId + payload` with first-chunk total-length byte
+- response reassembly by chunk IDs
+- asynchronous notification handling + synchronous request/response matching
 
 ## Svelte MCP
 
